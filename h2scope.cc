@@ -15,6 +15,7 @@
 #include <sstream>
 using namespace std;
 
+ FEATURE feature;
 int support_server_push;
 int support_http2;
 int support_ssl;
@@ -32,13 +33,10 @@ vector<int>rst_sequence;
 string recv_go_away;
 string recv_go_away_detail;
 string fatal;
-int server_push_disable_test_made;
-int server_push_disable_test_receive_push_promise;
 int default_max_concurrent_streams;
 int changed_max_concurrent_streams;
 int range_stream_id;
 int support_range;
-//string html;
 char * test_uri;
 string header_name;
 string server;
@@ -62,7 +60,6 @@ int on_begin_frame_callback(nghttp2_session *session,
                             const nghttp2_frame_hd *hd,
                             void *user_data);
 void print_result();
-void server_push_disable_test();
 //struct test_result my_result;
 //static FILE* result_fp;
 ofstream result_out;
@@ -106,8 +103,6 @@ void init_result_parameter(){
     priority_sequence.clear();
     max_concurrent_sequence.clear();
     rst_sequence.clear();
-    server_push_disable_test_made=0;
-    server_push_disable_test_receive_push_promise=0;
     default_max_concurrent_streams=0;
     changed_max_concurrent_streams=0;
     range_stream_id=0;
@@ -620,14 +615,6 @@ int on_frame_recv_callback(nghttp2_session *session,
             push_temp.stream_id = frame->push_promise.promised_stream_id;
             push_temp.size = frame->hd.length;
             receive_push_promises.push_back(push_temp);
-           /* nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, frame->push_promise.promised_stream_id, NGHTTP2_CANCEL);
-            if(server_push_disable_test_made==1)
-            {
-                server_push_disable_test_receive_push_promise=1;
-            }
-            server_push_disable_test();*/
-
-            //            nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, frame->push_promise.promised_stream_id, NGHTTP2_CANCEL);
             break;
         case NGHTTP2_PING:
             printf("[INFO] C <---------------------------- S (FRAME RECV) (PING)\n");
@@ -1298,29 +1285,6 @@ void clean_resource(){
 
 
 
-void server_push_disable_test(){
-    //struct Request req;
-    //request_init(&req, uri);
-    int rv;
-    nghttp2_settings_entry settings[] = {
-        //        {NGHTTP2_SETTINGS_HEADER_TABLE_SIZE, 4096}, // Default: 4096
-             {NGHTTP2_SETTINGS_ENABLE_PUSH, 0}, // Default enabled
-        //      {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 49}, // Default: 65535 (2^16-1)
-        //      {NGHTTP2_SETTINGS_MAX_FRAME_SIZE, (1 << 14)} // Default: 2^14  Range: 2^14 ~ 2^24-1
-    };
-    rv = nghttp2_submit_settings(connection.session, NGHTTP2_FLAG_NONE, settings, sizeof(settings) / sizeof(settings[0]));
-    if (rv != 0) {
-        diec("nghttp2_submit_settings", rv);
-    }
-    nghttp2_priority_spec pri_spec1;
-    
-    //nghttp2_priority_spec_init(&pri_spec1, 5, NGHTTP2_DEFAULT_WEIGHT, 0);
-    
-    submit_request(&connection, &req, &pri_spec1);
-    server_push_disable_test_made=1;
-
-}
-
 
 static int parse_uri(struct URI *res, const char *uri) {
     /* We only interested in https */
@@ -1421,8 +1385,6 @@ void print_result()
     for(int i=0;i<send_window_update.size();i++){
         result_out<<"send_window_update_id:"<<send_window_update.at(i).stream_id<<"size:"<<send_window_update.at(i).size_increment<<endl;
     }
-    result_out<<"server_push_disable_test_made:"<<server_push_disable_test_made<<endl;
-    result_out<<"server_push_disable_test_receive_push_promise:"<<server_push_disable_test_receive_push_promise<<endl;
     result_out<<"recv sequence:";
     for(int i=0;i<recv_sequence.size();i++){
         result_out<<recv_sequence.at(i)<<" ";
@@ -1487,17 +1449,115 @@ void finish_with_error(MYSQL *con)
 
 void print_help()
 {
-    printf("-t target site.\n");
-    printf("-d maximum delay\n");
-    printf("-p test priority\n");
-    printf("-s enable server push\n");
-    printf("-h print the help message\n");
-    printf("-h test hpack\n");
+    printf("==================================================================================================\n");
+    printf("=======================THIS TOOL IS TO TEST THE FEATURES OF HTTP/2 PROTOCOL=======================\n");
+    printf("since there are session conflicts between the methodologies to test different feasures, please    \n");
+    printf("specify one feasure for testing every time. Notice: -t(target site) is  mandotory\n");
+    printf("==================================================================================================\n");
+    printf("-t target site. For example:-t https://www.google.com\n");
+    printf("-c TLS connection approach. For example: -c npn/alpn. Default: alpn \n");
+    printf("-m Multiplexing. For example: -m number(number <= maximum streams number)\n");
+    printf("-f Flow Control on DATA/HEADERS frames. For example: -f data/headers\n");
+    printf("-z Zero window update frame detection on Stream/Connection. For exmaple: -z stream/connection\n");
+    printf("-l Large window update frame detection on Stream/Connection. For example: -l stream/connection\n");
+    printf("-s Server Push. For example: -s\n");
+    printf("-p Priority Mechanism. For example: -p\n");
+    printf("-e self-dependent For example: -e\n");
+    printf("-r Compression ration calculation for HPACK. For example: -r\n");
+    printf("-d HTTP2 Ping. For example: -d\n");
+    printf("-h Print the help message. For example: -h\n");
+    printf("==================================================================================================\n");
 }
 
+void init_config (struct CONFIG * _my_config)
+{
+   _my_config->uri = NULL;
+   _my_config->ssl_connection = "alpn";
+   _my_config->multiplexing = 0;
+   _my_config->flow_control = NULL;
+   _my_config->zero_window_update = NULL;
+   _my_config->large_window_update = NULL;
+   _my_config->server_push = 0;
+   _my_config->priority_mechanism = 0;
+   _my_config->self_dependent = 0;
+   _my_config->hpack = 0;
+   _my_config->h2_ping = 0;
+}
+
+void verify_config(struct CONFIG * _my_config )
+{
+   if (_my_config->uri == NULL){
+	printf("The target URL cannot be NULL. Please specify it with -t target_url;\n");
+	exit(0);
+	}
+   if ( strcmp(_my_config->ssl_connection,"npn") != 0  && strcmp( _my_config->ssl_connection, "alpn")!=0) {
+	printf("The SSL connection option can only be npn or alpn. Please specify it with -c npn/alpn Default is alpn\n");
+	exit(0);
+	}
+   if (_my_config->multiplexing == 1){
+	feature = MULTIPLEXING;
+	return;
+	}
+   if (_my_config->flow_control!=NULL){
+	if ( strcmp(_my_config->flow_control, "headers") == 0){
+	feature = CONTROL_HEADERS;
+	return;
+	}
+	if (strcmp(_my_config->flow_control, "data") == 0 ){
+	feature = CONTROL_HEADERS;
+	return;
+	}
+	printf("The flow control option can only be headers or data. Please specify it with -f headers/data\n");
+  	exit(0);
+  }
+   if (_my_config->zero_window_update !=NULL){
+	if (strcmp(_my_config->zero_window_update, "stream") == 0){
+	feature = ZERO_WINDOW_UPDATE_STREAM;
+	return;
+	}
+	if (strcmp(_my_config->zero_window_update, "connection") == 0){
+	feature = ZERO_WINDOW_UPDATE_CONNECTION;
+	return;
+	}
+	printf("The zero window update option can only be stream or connection. Please specify it with -z stream/connection\n");
+	exit(0);
+   }
+   if (_my_config->large_window_update !=NULL){
+	if (strcmp(_my_config->large_window_update, "stream") == 0){
+	feature = LARGE_WINDOW_UPDATE_STREAM;
+	return;
+	}
+	if (strcmp(_my_config->large_window_update, "connection")==0){
+	feature = LARGE_WINDOW_UPDATE_CONNECTION;
+	return;
+	}
+	printf("The large window update option can only be stream or connection. Please specify it with -z stream/connection\n");
+	exit(0);
+   }
+   if (_my_config->server_push == 1){
+	feature = SERVER_PUSH;
+	return;
+	}
+   if (_my_config->priority_mechanism == 1){
+	feature = PRIORITY_MECHANISM;
+	return;
+	}
+   if (_my_config->self_dependent == 1){
+	feature = SELF_DEPENDENT;
+	return;
+	}
+   if (_my_config->hpack == 1){
+	feature = HPACK;
+	return;
+	}
+   if (_my_config->h2_ping == 1){
+	feature = H2_PING;
+	return;
+	}
+}
 
 int main(int argc, char **argv) {
-    result_out.open("/tmp/text.txt",ios::out);
+/*    result_out.open("/tmp/text.txt",ios::out);
     
     init_result_parameter();
 
@@ -1518,7 +1578,7 @@ int main(int argc, char **argv) {
 #ifndef OPENSSL_IS_BORINGSSL
     OPENSSL_config(NULL);
 #endif /* OPENSSL_IS_BORINGSSL */
-    SSL_load_error_strings();
+/*    SSL_load_error_strings();
     SSL_library_init();
     test_uri=argv[1];
     rv = parse_uri(&uri, argv[1]);
@@ -1532,5 +1592,73 @@ int main(int argc, char **argv) {
     clean_resource();
     //test2();
     //print_test_result(&my_result);
-    return EXIT_SUCCESS;
+    return EXIT_SUCCESS;*/
+ int ch;
+ int feature_num = 0;
+ struct  CONFIG my_config;
+ init_config(&my_config);
+while ((ch = getopt(argc, argv, "t:c:mf:z:l:sperdh")) != -1)
+       {
+           switch (ch) 
+        {
+               case 't':
+		    my_config.uri = optarg;
+                    break;
+               case 'c':
+		    my_config.ssl_connection = optarg;
+                    break;
+               case 'm':
+		    feature_num++;
+		    my_config.multiplexing = 1;
+                    break;
+               case 'f':
+		    feature_num++;
+		    my_config.flow_control = optarg;
+                    break;
+              case 'z':
+		    feature_num++;
+		    my_config.zero_window_update = optarg;
+                  break;
+              case 'l':
+		    feature_num++;
+		    my_config.large_window_update = optarg;
+                  break;
+              case 's':
+		    feature_num++;
+		    my_config.server_push = 1;
+                  break;
+              case 'p':
+		    feature_num++;
+		    my_config.priority_mechanism = 1;
+                  break;
+              case 'e':
+		    feature_num++;
+		    my_config.self_dependent = 1;
+                  break;
+              case 'r':
+		    feature_num++;
+		    my_config.hpack = 1;
+                  break;
+              case 'd':
+		    feature_num++;
+		    my_config.h2_ping = 1;
+                  break;
+              case 'h':
+ 		    print_help();
+		    exit(1);
+                  break;
+              case '?':
+                    printf("Unknown option: %c\n",(char)optopt);
+                    break;
+               }
+       }
+if (feature_num>1){
+ printf("Due to the conflicts between the methodoligies for feature testing, please specify one feature every time\n");
+ exit(1);
+}
+if (feature_num == 0){
+printf ("Please specify the feature you want to test\n");
+ exit(1);
+}
+verify_config(&my_config);
 }

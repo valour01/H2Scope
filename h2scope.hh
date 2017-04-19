@@ -156,6 +156,36 @@ struct data_frame{
     int end;
 };
 
+struct CONFIG{
+    char * uri;
+    char * ssl_connection;
+    int multiplexing;
+    char * flow_control;
+    char * zero_window_update;
+    char * large_window_update;
+    int server_push;
+    int priority_mechanism;
+    int self_dependent;
+    int hpack;
+    int h2_ping;
+};
+
+
+typedef enum {
+    MULTIPLEXING,
+    CONTROL_HEADERS,
+    CONTROL_DATA,
+    ZERO_WINDOW_UPDATE_STREAM,
+    ZERO_WINDOW_UPDATE_CONNECTION,
+    LARGE_WINDOW_UPDATE_STREAM,
+    LARGE_WINDOW_UPDATE_CONNECTION,
+    SERVER_PUSH,
+    PRIORITY_MECHANISM,
+    SELF_DEPENDENT,
+    HPACK,
+    H2_PING
+}FEATURE;
+
 #endif /* http_test_hpp */
 #define MAX_OUTLEN 4096
 
