@@ -168,11 +168,13 @@ struct CONFIG{
     int self_dependent;
     int hpack;
     int h2_ping;
+    int no_feature;
+    int debug;
 };
 
 
 typedef enum {
-    MULTIPLEXING,
+    MULTIPLEXING=1,
     CONTROL_HEADERS,
     CONTROL_DATA,
     ZERO_WINDOW_UPDATE_STREAM,
