@@ -138,9 +138,50 @@ void cal_hpack_ratio(){
 	printf("The hpack compression ratio is %f%\n",ratio*100);
 }
 
+int get_pos(int id,vector<int> & array){
+	for (int i=0;i<array.size();i++){
+	if (array.at(i) == id){
+	return i;
+}
+	}
+return -1;
+	
+}
 
 void check_priority_support(){
+	vector<int> receive_order;
+	vector<int> finish_order;
+	for(int i =0;i<receive_data_frames.size();i++){
+		if (receive_data_frames.at(i).stream_id>2*priority_stream_num){
+			printf("receive data from stream %d\n",receive_data_frames.at(i).stream_id-2*priority_stream_num);
+			receive_order.push_back(receive_data_frames.at(i).stream_id-2*priority_stream_num);
+			if(receive_data_frames.at(i).end == 1){
+				finish_order.push_back(receive_data_frames.at(i).stream_id-2*priority_stream_num);
+			printf("finish stream %d\n",receive_data_frames.at(i).stream_id-2*priority_stream_num);
+			}
+		}
+	}
+	int D_receive_pos = get_pos(7,receive_order); //stream ID:7
+	int A_receive_pos = get_pos(1,receive_order); //stream ID:1
+	int E_receive_pos = get_pos(9,receive_order); //stream ID:9
+	int C_receive_pos = get_pos(5,receive_order); //stream ID:5
+	if ((D_receive_pos <A_receive_pos) and (A_receive_pos <C_receive_pos) and (C_receive_pos<E_receive_pos) and (A_receive_pos>=0) and (D_receive_pos>=0) and (E_receive_pos>=0) and (C_receive_pos>=0)){
+		printf("Priority Mechanism check pass on Receive Data Order\n");
+	}	
+	else{
+		printf("Priority Mechanism check fail on Receive Data Order\n");
+	}
 
+	int D_finish_pos = get_pos(7,finish_order); //stream ID:7
+	int A_finish_pos = get_pos(1,finish_order); //stream ID:1
+	int E_finish_pos = get_pos(9,finish_order); //stream ID:9
+	int C_finish_pos = get_pos(5,finish_order); //stream ID:5
+	if ((D_finish_pos <A_finish_pos) and (A_finish_pos <C_finish_pos) and (C_finish_pos<E_finish_pos) and (A_finish_pos>=0) and (D_receive_pos>=0) and (E_receive_pos>=0) and (C_receive_pos>=0)){
+		printf("Priority Mechanism check pass on Finish Data Order\n");
+	}
+	else{
+		printf("Priority Mechanism check fail on Finish Data Order\n");
+	}	
 }
 /*
  * Prints error containing the function name |func| and message |msg|
@@ -603,9 +644,6 @@ int on_frame_send_callback(nghttp2_session *session,
 int on_frame_recv_callback(nghttp2_session *session,
 		const nghttp2_frame *frame,
 		void *user_data ) {
-	//    nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, frame->hd.stream_id, NGHTTP2_CANCEL);
-	//    nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, 0, NGHTTP2_CANCEL);
-
 	switch (frame->hd.type) {
 		case NGHTTP2_DATA:
 			if(my_config.debug){
@@ -619,6 +657,9 @@ int on_frame_recv_callback(nghttp2_session *session,
 			receive_data_frames.push_back(data_temp);
 
 			if (feature == PRIORITY_MECHANISM){
+				//if(frame->hd.stream_id == (2*priority_stream_num + 11) and frame->hd.flags == 1){
+				//}
+
 				priority_recv_length+=frame->hd.length;
 				if (frame->hd.stream_id==1){
 					priority_payload_length+=frame->hd.length;
@@ -1490,6 +1531,10 @@ static void basic_test(const struct URI *uri) {
 	}
 
 	request_free(&req);
+
+		if(feature == PRIORITY_MECHANISM){
+		check_priority_support();      
+  }
 }
 
 void clean_resource(){
