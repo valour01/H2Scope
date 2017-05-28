@@ -21,12 +21,13 @@ nghttp2_priority_spec pri_spec1;
 struct Connection connection;
 struct Request req;
 int hpack_send_num = 0;
-int payload_length=0;
-int stream_num=0;
-int recv_length=0;
+int priority_payload_length=0;
+int priority_stream_num=0;
+int priority_recv_length=0;
 int support_server_push;
 int support_http2;
 int support_ssl;
+int support_h2_ping=0;
 vector<data_frame>receive_data_frames;
 vector<id_size>receive_headers_frames;
 vector<id_size>send_data_frames;
@@ -38,7 +39,7 @@ vector<int>finish_sequence;
 vector<int>priority_sequence;
 vector<int>max_concurrent_sequence;
 vector<int>rst_sequence;
-string recv_go_away;
+string recv_go_away="";
 string recv_go_away_detail;
 string fatal;
 int default_max_concurrent_streams;
@@ -51,8 +52,11 @@ string server;
 timeval timeout;
 clock_t begTime;
 clock_t timespend;
+struct timeval ping_start;
+struct timeval ping_end;
 
 
+void check_result();
 static int submit_request(struct Connection *connection, struct Request *req, const nghttp2_priority_spec *pri_spec);
 void print_settings_frame(const nghttp2_settings *settings_frame);
 void print_rst_stream_frame(const nghttp2_rst_stream *rst_stream_frame);
@@ -94,6 +98,7 @@ void init_result_parameter(){
 	support_server_push=0;
 	support_http2=0;
 	support_ssl=0;
+	support_h2_ping=0;
 	receive_data_frames.clear();
 	receive_headers_frames.clear();
 	receive_push_promises.clear();
@@ -114,11 +119,29 @@ void init_result_parameter(){
 static void die(const char *msg) {
 	cout<<"die"<<endl;
 	fatal=char_star_to_string(msg);
+	if(my_config.debug){
 	fprintf(stderr, "FATAL: %s\n", msg);
+	}
+	check_result();
 	print_result();
 	exit(EXIT_FAILURE);
 }
 
+void cal_hpack_ratio(){
+	float ratio;
+	int first_size = receive_headers_frames.at(0).size;
+	int total_size = 0;
+        for(int i =0;i<receive_headers_frames.size();i++){
+                total_size +=receive_headers_frames.at(i).size;
+        }
+	ratio = float(total_size)/(10*first_size);
+	printf("The hpack compression ratio is %f%\n",ratio*100);
+}
+
+
+void check_priority_support(){
+
+}
 /*
  * Prints error containing the function name |func| and message |msg|
  * and exit.
@@ -127,7 +150,10 @@ static void die(const char *msg) {
 static void dief(const char *func, const char *msg) {
 	cout<<"dief"<<endl;
 	fatal=char_star_to_string(func)+":"+char_star_to_string(msg);
+	if(my_config.debug){
 	fprintf(stderr, "FATAL: %s: %s\n", func, msg);
+	}
+	check_result();
 	print_result();
 	exit(EXIT_FAILURE);
 }
@@ -138,9 +164,12 @@ static void dief(const char *func, const char *msg) {
  */
 
 static void diec(const char *func, int error_code) {
+	if(my_config.debug){
 	fprintf(stderr, "FATAL: %s: error_code=%d, msg=%s\n", func, error_code, nghttp2_strerror(error_code));
+	}
 	fatal=char_star_to_string(nghttp2_strerror(error_code));
 	//print_test_result(&my_result);
+	check_result();
 	print_result();
 	exit(EXIT_FAILURE);
 }
@@ -274,7 +303,6 @@ static int connect_to(const char *host, uint16_t port) {
 		timeout.tv_usec=0;
 
 		while ((rv = connect(fd, rp->ai_addr, rp->ai_addrlen)) == -1 && errno == EINTR);
-		cout<<"rv"<<rv<<endl;
 		if (rv == 0) {
 			break;
 		}
@@ -482,13 +510,13 @@ int on_frame_send_callback(nghttp2_session *session,
 			}
 			if(frame->hd.stream_id==1 && feature == SELF_DEPENDENT){
 				nghttp2_submit_priority(session, NGHTTP2_FLAG_NONE, 1, &pri_spec1);
-				printf("The zero window update frame on the whole session has been sent out\n");
+				printf("The self dependent priority frame  has been sent out\n");
 			}
 			if(feature == PRIORITY_MECHANISM){
-				if (frame->hd.stream_id == 2*stream_num+11){
+				if (frame->hd.stream_id == 2*priority_stream_num+11){
 					nghttp2_priority_spec temp_spec;
-					nghttp2_priority_spec_init(&temp_spec, 2*stream_num+7, 1, 1);
-					nghttp2_submit_priority(session, NGHTTP2_FLAG_NONE, 2*stream_num+1, &temp_spec);
+					nghttp2_priority_spec_init(&temp_spec, 2*priority_stream_num+7, 1, 1);
+					nghttp2_submit_priority(session, NGHTTP2_FLAG_NONE, 2*priority_stream_num+1, &temp_spec);
 					sleep(2);
 					nghttp2_submit_window_update(session, NGHTTP2_FLAG_NONE, 0, 1<<30);
 				}
@@ -508,8 +536,10 @@ int on_frame_send_callback(nghttp2_session *session,
 			}
 			break;
 		case NGHTTP2_RST_STREAM:
+			if(my_config.debug){
 			printf("[INFO] C ----------------------------> S (FRAME SEND) (RST_STREAM)\n");
 			print_rst_stream_frame(&frame->rst_stream);
+			}
 			break;
 		case NGHTTP2_SETTINGS:
 			if(my_config.debug){
@@ -524,14 +554,19 @@ int on_frame_send_callback(nghttp2_session *session,
 			}
 			break;
 		case NGHTTP2_PING:
+			if (feature == H2_PING){
+				gettimeofday(&ping_start,NULL);
+			}
 			if(my_config.debug){
 				printf("[INFO] C ----------------------------> S (FRAME SEND) (PING)\n");
 				print_ping_frame(&frame->ping);
 			}
 			break;
 		case NGHTTP2_GOAWAY:
+			if(my_config.debug){
 			printf("[INFO] C ----------------------------> S (FRAME SEND) (GOAWAY)\n");
 			print_goaway_frame(&frame->goaway);
+			}
 			break;
 		case NGHTTP2_WINDOW_UPDATE:
 			if(my_config.debug){
@@ -584,33 +619,33 @@ int on_frame_recv_callback(nghttp2_session *session,
 			receive_data_frames.push_back(data_temp);
 
 			if (feature == PRIORITY_MECHANISM){
-				recv_length+=frame->hd.length;
+				priority_recv_length+=frame->hd.length;
 				if (frame->hd.stream_id==1){
-					payload_length+=frame->hd.length;
+					priority_payload_length+=frame->hd.length;
 				}
 
 				if(frame->hd.stream_id==1 and frame->hd.flags==1){
-					if (payload_length==0){
+					if (priority_payload_length==0){
 						die("payload is zero");
 					}
-					stream_num=65535/payload_length;
-					if (65535%payload_length==0){
-						stream_num=stream_num;
+					priority_stream_num=65535/priority_payload_length;
+					if (65535%priority_payload_length==0){
+						priority_stream_num=priority_stream_num;
 					}else{
-						stream_num++;
+						priority_stream_num++;
 					}
 
-					for (int i =0;i<stream_num-1;i++)
+					for (int i =0;i<priority_stream_num-1;i++)
 					{
 						submit_request(&connection, &req, NULL);
 					}
 				}
-				if(payload_length==65535){
-					stream_num=1;
+				if(priority_payload_length==65535){
+					priority_stream_num=1;
 				}
-				if (recv_length==65535){
+				if (priority_recv_length==65535){
 					//stream_num=1;
-					for (int i=0;i<stream_num;i++){
+					for (int i=0;i<priority_stream_num;i++){
 						nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, 2*i+1, NGHTTP2_NO_ERROR);
 					}
 					sleep(2);
@@ -666,11 +701,15 @@ int on_frame_recv_callback(nghttp2_session *session,
 					      if(hpack_send_num<9 && feature==HPACK){
 						      submit_request(&connection, &req, NULL);
 						      hpack_send_num++;
+						      printf("Send test request %d\n",hpack_send_num+1);
 					      }
 					      id_size headers_temp;
 					      headers_temp.stream_id = frame->hd.stream_id;
 					      headers_temp.size = frame->hd.length;
 					      receive_headers_frames.push_back(headers_temp);
+					      if(receive_headers_frames.size()==10 && feature==HPACK){
+						cal_hpack_ratio();
+						}
 
 					      struct Request *req = NULL;
 					      nghttp2_nv *nva = NULL;
@@ -729,18 +768,27 @@ int on_frame_recv_callback(nghttp2_session *session,
 				      receive_push_promises.push_back(push_temp);
 				      break;
 		case NGHTTP2_PING:
+				      support_h2_ping=1;
+				      if (feature == H2_PING){
+					      gettimeofday(&ping_end,NULL);
+					      unsigned long diff;
+					      diff = 1000000 * (ping_end.tv_sec-ping_start.tv_sec)+ ping_end.tv_usec-ping_start.tv_usec;
+					      printf ("Ping time is %ldus\n",diff);
+				      }
 				      if(my_config.debug){
 					      printf("[INFO] C <---------------------------- S (FRAME RECV) (PING)\n");				
 					      print_ping_frame(&frame->ping);
 				      }
 				      break;
 		case NGHTTP2_GOAWAY:
-				      printf("[INFO] C <---------------------------- S (FRAME RECV) (GOAWAY)\n");
 				      recv_go_away+="LS_ID:"+int_to_string(frame->goaway.last_stream_id)+"|";
 				      recv_go_away+="EC:"+print_err_code_string(frame->goaway.error_code)+"|";
 				      recv_go_away_detail.assign((char*)frame->goaway.opaque_data,frame->goaway.opaque_data_len);
 				      recv_go_away+="Detail:"+recv_go_away_detail+"|";
+				      if(my_config.debug){
+				      printf("[INFO] C <---------------------------- S (FRAME RECV) (GOAWAY)\n");
 				      print_goaway_frame(&frame->goaway);
+				      }
 				      break;
 		case NGHTTP2_WINDOW_UPDATE:
 				      if(my_config.debug){
@@ -1229,7 +1277,9 @@ int on_begin_frame_callback(nghttp2_session *session,
 			}
 			break;
 		case NGHTTP2_GOAWAY:
+			if(my_config.debug){
 			printf("[INFO] C <---------------------------- S (BEGIN FRAME RECV) (GOAWAY)\n");
+			}
 			break;
 		case NGHTTP2_WINDOW_UPDATE:
 			if(my_config.debug){
@@ -1401,6 +1451,7 @@ static void basic_test(const struct URI *uri) {
 	if (feature == HPACK){
 		printf("Now It's going to test the hpack feature\n");
 		submit_request(&connection, &req, NULL);
+		printf("Send test request 1\n");
 	}
 	if (feature == H2_PING){
 		printf("Now It's going to test the HTTP/2 ping feature\n");
@@ -1653,7 +1704,7 @@ void verify_config(struct CONFIG * _my_config )
 			return;
 		}
 		if (strcmp(_my_config->flow_control, "data") == 0 ){
-			feature = CONTROL_HEADERS;
+			feature = CONTROL_DATA;
 			return;
 		}
 		printf("The flow control option can only be headers or data. Please specify it with -f headers/data\n");
@@ -1705,8 +1756,84 @@ void verify_config(struct CONFIG * _my_config )
 	}
 }
 
-void check_support()
+void check_result()
 {
+			int data_size=0;
+	switch(feature){
+		case MULTIPLEXING:
+			break;
+		case CONTROL_HEADERS:
+			if (receive_headers_frames.size() == 0){
+				printf("Zero Initial Window can control the headers frame\n"); 
+			}
+			else{
+				printf("Zero Initial Window can not control the headers frame\n");
+			}
+			break;
+		case CONTROL_DATA:
+			for(int i =0;i<receive_data_frames.size();i++){
+				data_size+=receive_data_frames.at(i).size;
+			}				
+			if (data_size == 1){
+				printf ("One Initial Window receive One size data frames\n");
+			}
+			break;
+		case ZERO_WINDOW_UPDATE_STREAM:
+			for (int i=0;i<rst_sequence.size();i++){
+				if (rst_sequence.at(i)==1){
+				printf("Recevie rst stream due to zero window on stream one\n");
+			}
+			if (recv_go_away!=""){
+				printf("Receive Go Away frame due to zero window update on Window");
+			}
+			}	
+			break;
+		case ZERO_WINDOW_UPDATE_CONNECTION:
+			if (recv_go_away!=""){
+				printf("Receive Go Away frame due to zero window update on Window\n");
+			}
+			break;
+		case LARGE_WINDOW_UPDATE_STREAM:
+			for (int i=0;i<rst_sequence.size();i++){
+				if (rst_sequence.at(i)==1){
+				printf("Recevie rst stream due to zero window on stream one\n");
+			}
+			if (recv_go_away!=""){
+				printf("Receive Go Away frame due to zero window update on Window\n");
+			}
+			}	
+			break;
+		case LARGE_WINDOW_UPDATE_CONNECTION:
+			if (recv_go_away!=""){
+				printf("Receive Go Away frame due to zero window update on Window\n");
+			}
+			break;
+		case PRIORITY_MECHANISM:
+			break;
+		case SERVER_PUSH:
+			if (support_server_push==1){
+				printf("We receive the push promise frames\n");		
+			}
+			break;
+		case SELF_DEPENDENT:
+			for (int i=0;i<rst_sequence.size();i++){
+				if (rst_sequence.at(i)==1){
+				printf("Recevie rst stream due to self dependent prioirty frame on stream one\n");
+			}
+			if (recv_go_away!=""){
+				printf("Receive Go Away frame due to self dependent priority frame on stream one\n");
+			}
+			}	
+			break;
+		case HPACK:
+			break;
+		case H2_PING:
+			if (support_h2_ping){
+				printf("Receive H2 Ping Frames from the server side\n");
+			}
+			break;
+	}
+
 
 }
 
@@ -1803,6 +1930,7 @@ int main(int argc, char **argv) {
 	SSL_library_init();
 	basic_test(&uri);
 	clean_resource();
+	check_result();
 	return EXIT_SUCCESS;
 
 }
