@@ -3,12 +3,12 @@ CC = g++
 CFLAGS = -v
 DEBUG = -g
 LIBS = -lnghttp2 -lssl -lcrypto -ldl -lmysqlclient
-INCLUDES = -I/home/jmh/Downloads/nghttp2-1.13.0/lib  -I/usr/local/include  -I/usr/include/mysql  -L/usr/local/lib  -L/usr/lib/x86_64-linux-gnu/
+INCLUDES =  -I/usr/local/include  -I/usr/include/mysql  -L/usr/local/lib  -L/usr/lib/x86_64-linux-gnu/
 #OBJS = h2scope.o
 
 all: $(MAIN)
 
-%.o: %.cc %.hh
+%.o: %.cc %.hh %c %h
 	$(CC) $(CFLAGS) $(DEBUG) $(INCLUDES) -c $< -o $@
 
 $(MAIN): h2scope.cc 
