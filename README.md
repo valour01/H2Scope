@@ -33,3 +33,15 @@ $ make
 ```
 
 Tool named h2scope will be installed in the H2Scope directory. Try to type ./h2scope -h for help information
+
+If you use this code, please cite the following paper. Thanks!
+
+Muhui Jiang, Xiapu Luo, Tungngai Miu, Shengtuo Hu and Weixiong Rao,
+“Are HTTP/2 Servers Ready Yet?”, Proc. of 37th IEEE International Conference on Distributed Computing Systems (ICDCS), Atlanta, USA, June 2017.
+
+@inproceedings{JiangICDCS17,
+ author = {Muhui Jiang and Xiapu Luo and Tungngai Miu and Shengtuo Hu and Weixiong Rao},
+ title = {Are HTTP/2 Servers Ready Yet?},
+ booktitle = {Proc. IEEE ICDCS},
+ year = {2017},
+}
